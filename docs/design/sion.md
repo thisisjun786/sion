@@ -7,7 +7,7 @@ SION (Sweeping Inspector Over Noise) is a repository maintainer. It reviews ever
 This contract covers:
 
 - SION's four jobs and the roles it shares with LINA and maintainers
-- the ClawSweeper base and the rules for following upstream
+- the ClawSweeper base, the source layout and the rules for following upstream
 - the GitHub Actions runtime: source, operator and target repositories, the GitHub App identity, model credentials, the `state` and `mailbox` branches, concurrency and the status dashboard
 - commands, the internal repair loop and per-repository stages
 - the LINA link
@@ -64,10 +64,20 @@ SION adds, and keeps thin:
 
 The GitHub-only runtime is the one large divergence. Upstream keeps canonical records and its work queue in a Cloudflare Worker with Durable Objects, and keeps action ledgers and assets in R2. SION keeps records, ledgers, queue leases and assets on the operator repository's `state` branch, serializes work per item with Actions concurrency, and publishes its status dashboard with GitHub Pages. No capability those services provide is dropped. All storage access sits behind one storage adapter boundary, so the divergence lives in one place in the code. Upstream code that serves OpenClaw's own deployment, such as the profiles of OpenClaw's repositories, private inference routing and hosted fleet tooling, stays in the tree unchanged and is not enabled by SION's settings.
 
-Following upstream:
+### Source layout
+
+The upstream ClawSweeper tree sits under `upstream/` in this repository as a git subtree.
+
+- Upstream files keep their content and their paths relative to `upstream/`. SION changes them only at the storage adapter boundary and for its own additions.
+- The repository root belongs to SION: its README, LICENSE, AGENTS.md, CONTRIBUTING.md, policies, design contracts and `.github/`. Upstream's copies of these files stay under `upstream/`, including upstream's license.
+- GitHub runs workflows only from the root `.github/workflows/`, so upstream's workflows under `upstream/.github/workflows/` never run in this repository. The root holds SION's CI, its release workflow and its reusable workflows. A reusable workflow runs only when an operator repository calls it.
+- The workflows that run for an installation live in its operator repository; SION's installation places them there (see Operator repository). SION's reusable workflows check out the pinned SION release and run upstream's code and composite actions from its `upstream/` tree.
+- The `foundation` gate installs and checks the upstream tree with upstream's own toolchain and lockfile ([CI policy](../policy/ci.md), [dependency policy](../policy/dependencies.md)).
+
+### Following upstream
 
 - [Third-party notices](../../THIRD-PARTY-NOTICES.md) record the upstream commit SION contains, upstream's license notice and a summary of SION's modifications.
-- An upstream sync is a pull request into `dev` that merges one named upstream commit with a merge commit. Conflicts are resolved at the storage adapter boundary or in the SION-only additions, never by rewriting upstream behavior. The sync passes `foundation` with upstream's tests and SION's tests.
+- An upstream sync is a pull request into `dev` that brings one named upstream commit into `upstream/` with `git subtree merge --prefix upstream` and merges with a merge commit. Conflicts are resolved at the storage adapter boundary or in the SION-only additions, never by rewriting upstream behavior. The sync passes `foundation` with upstream's tests and SION's tests.
 - A fix that is not specific to SION is also offered upstream. SION drops its own copy once upstream has it.
 - SION does not reformat, rename or reorganize upstream files.
 - Each SION release names the upstream commit it contains.
@@ -87,14 +97,14 @@ Target repo     a repository SION serves: one dispatcher workflow and the SION G
 
 Each installation has exactly one operator repository. It holds:
 
-- workflows that call SION's reusable workflows pinned to one SION release tag. Moving to another SION release is a pull request in the operator repository that sets the new tag. Release tags are immutable ([release policy](../policy/releases.md)).
+- workflows that call SION's reusable workflows pinned to one SION release tag. SION's installation places them in the operator repository. Moving to another SION release is a pull request in the operator repository that sets the new tag. Release tags are immutable ([release policy](../policy/releases.md)).
 - settings on the default branch: the allowed target repositories and, for each one, its stage, repository profile, command permissions, LINA link switch and limits. SION never acts on a repository the settings do not list.
 - Actions secrets: the SION App private key and the model API key.
 - the `state` branch (see State branch) and the Pages site built from it.
 - the `mailbox` branch, when the LINA link is on (see LINA link).
 - rulesets that keep each branch to its writer: only the SION App updates `state`, and only the operator repository's maintainers update `mailbox`. No identity may force-push or delete these branches.
 
-Installation state lives only in the operator repository. SION's source repository and LINA's repository hold none. The operator repository must be no more visible than the most restricted target it serves, because records quote target content.
+Installation state lives only in the operator repository. SION's source repository and LINA's repository hold none. The operator repository must be no more visible than the most restricted target it serves, because records quote target content. This is upstream behavior: upstream serves a private or internal target only when its records publish to a private state surface.
 
 Operator workflows cover scheduled scans, event intake, item workers for the review, apply and repair lanes, state publication and the dashboard build. Each job declares the smallest workflow token it needs: `pages: write` and `id-token: write` only in the Pages deployment, `actions: write` only in jobs that queue follow-up runs. A job that pushes `state` does so with a SION App installation token narrowed to the operator repository and `contents: write`, because the `state` ruleset admits only the SION App.
 
@@ -135,7 +145,7 @@ assets/     published assets that records refer to
 status/     data the dashboard is built from
 jobs/, results/, notifications/
             upstream's operational state
-outbox/     envelopes SION writes for LINA, and SION's declaration (LINA link)
+outbox/     envelopes SION writes for LINA, and declaration.json (LINA link)
 ```
 
 Directories that also exist upstream keep upstream's names and formats.
@@ -152,7 +162,7 @@ Directories that also exist upstream keep upstream's names and formats.
 An operator workflow builds a static status dashboard from the `state` branch and publishes it with GitHub Pages. It shows the queue, running and recent jobs, per-repository status, recent actions, failures and automerge progress.
 
 - The dashboard is observability only. It never starts, steers or authorizes work, and the page makes no requests to GitHub.
-- A Pages site is public unless the account provides Pages access control. The build therefore includes only public target repositories unless the operator repository's Pages site is access-controlled, and it refuses to publish otherwise.
+- A Pages site is public unless the account provides Pages access control. Unless the operator repository's Pages site is access-controlled, the dashboard shows only public target repositories. This is upstream behavior: upstream's public dashboard views never show private repositories. When it leaves private targets out, the page says so, and the build records which targets it left out on `state`.
 
 ### Costs of the GitHub-only runtime
 
@@ -203,15 +213,17 @@ A stage is the level of automation enabled for one target repository in the oper
 
 The App's installation permissions are those of the highest stage in use. Each job's token is narrowed further, as described in Identity. Closing and merging are also limited by the repository profile's close reasons and merge gates.
 
+The permissions follow what upstream's jobs request for the same work. Upstream's jobs read check runs and commit statuses and publish no Check Runs, so every stage reads checks and none writes them.
+
 ## LINA link
 
-SION and LINA are siblings. Each has its own repository, canon and voice, and each keeps every feature when the other is absent or the link is off. They never call each other at runtime; the operator repository's `mailbox` and `state` branches are their only contact points. The link is switched on per target repository in the operator settings. When it is off for a repository, SION reads nothing from the `mailbox` branch and writes nothing to `outbox/` for it.
+SION and LINA are siblings. Each has its own repository, canon and voice, and each keeps every feature when the other is absent or the link is off. They never call each other at runtime; the operator repository's `mailbox` and `state` branches are their only contact points. The link is switched on per target repository in the operator settings, and SION's declaration lists the target repositories whose link is on. When it is off for a repository, SION reads nothing from the `mailbox` branch and writes nothing to `outbox/` for it. On LINA's side, a person connects LINA to an installation by naming its operator repository in LINA, and that choice is the person's approval ([LINA integrations](https://github.com/thisisjun786/lina/blob/dev/docs/design/integrations.md#sion-link)).
 
 ### Messages
 
 - Every message between LINA and SION is an envelope as defined by LINA's host protocol, carrying a SION payload. SION defines no message format of its own, and payload fields are defined only in LINA's schema.
 - LINA to SION, on the `mailbox` branch: judgment input for a repository or an item, such as its relevance to LINA's goals and plans, its priority and related work.
-- SION to LINA, in `outbox/`: item results. A result says what happened (reviewed with its verdict, fixed, merged, closed, reopened) and its effect state as the host protocol defines it. It names the target repository, the item, the head or merge commit, the ledger event and the `state` commit that holds the record.
+- SION to LINA, in `outbox/`: item results. The [SION section of LINA's host protocol](https://github.com/thisisjun786/lina/blob/dev/docs/design/host-protocol.md#sion) defines a result's fields. Every result SION writes carries the state of the checks at the head or merge commit it names.
 
 ### Types
 
@@ -219,7 +231,7 @@ The protocol's canonical source is LINA's JSON Schema (draft 2020-12, in `protoc
 
 ### Mailbox and outbox rules
 
-- LINA writes only new files on the `mailbox` branch and never edits or deletes a file there. It writes with its user's GitHub setup; the `mailbox` ruleset admits only the operator repository's maintainers. LINA never writes `state`, and SION issues no credential to LINA. SION only reads the `mailbox` branch.
+- LINA writes only new files on the `mailbox` branch, at the paths that LINA's schema and fixtures define, and never edits or deletes a file there. It writes with its user's GitHub setup; the `mailbox` ruleset admits only the operator repository's maintainers. LINA never writes `state`, and SION issues no credential to LINA. SION only reads the `mailbox` branch.
 - SION validates every mailbox envelope against the schema and its declared versions. An envelope with an unsupported version, an invalid shape or an unknown payload is refused: SION writes the refusal to `outbox/` and does not act on the input.
 - A judgment is review input, never a command and never an authorization. It can raise or lower an item's priority and inform the next step SION writes. It never causes a close, push or merge by itself, and instructions inside it are treated as data.
 - A result whose effect state is refused, failed or unknown is reported as such and never counted as success. SION does not retry the same input without bound.
@@ -228,7 +240,7 @@ The protocol's canonical source is LINA's JSON Schema (draft 2020-12, in `protoc
 
 ### Versions and conformance
 
-- Each SION release declares the protocol and capability versions it speaks. SION writes that declaration, with the release tag the operator repository pins, at a fixed path in `outbox/`, so LINA can check the combination against its supported-combination table before it reads any result.
+- SION's declaration is `outbox/declaration.json` on the `state` branch. It holds SION's product version, which is the release tag the operator repository pins, the protocol versions and capabilities that release speaks, and the target repositories whose LINA link is on. SION keeps it current with the pinned release and the settings, so LINA can check the combination against its supported-combination table before it reads any result.
 - LINA publishes conformance fixtures for each protocol version. SION's CI runs every fixture of every protocol version SION declares as part of the `foundation` gate, and a SION release passes the fixtures of every version it declares.
 
 How this meets each sibling-compatibility condition:
@@ -244,15 +256,17 @@ How this meets each sibling-compatibility condition:
 
 ## Repository policy
 
-SION uses the same contribution, CI, branch and release policy as LINA and RUMI. The [contribution guide](../../CONTRIBUTING.md), [issue policy](../policy/issues.md), [PR policy](../policy/pull-requests.md), [CI policy](../policy/ci.md) and [release policy](../policy/releases.md) define it. For SION this means:
+SION uses the same contribution, CI, branch and release policy as LINA and RUMI. The [contribution guide](../../CONTRIBUTING.md), [issue policy](../policy/issues.md), [PR policy](../policy/pull-requests.md), [CI policy](../policy/ci.md) and [release policy](../policy/releases.md) define it. The [dependency policy](../policy/dependencies.md) covers the packages and other outside code SION uses. For SION this means:
 
 - Imported upstream code, the storage adapter, the generated protocol types and the conformance fixtures each register their real verification commands and path mapping with the `foundation` gate.
+- The upstream tree keeps upstream's lockfile as upstream ships it. Packages that only SION's own code uses are registered under SION's rules.
 - Operator repositories pin SION by its immutable release tags, and the target dispatcher ships with the same release.
 
 ## Deferred
 
 - Scheduler cadence, concurrency caps, per-job timeouts and the repair round bound: set by acceptance of roadmap Stage 2 (runtime) and Stage 5 (operate) on the first target repositories, starting from upstream's values.
 - Size budget of the `state` branch, its history compaction and the asset size limit: set by the roadmap Stage 2 runtime measurement.
+- Where SION's own TypeScript and its package manifest sit, and how that code imports upstream code: set by roadmap Stage 1 when it draws the storage adapter boundary.
 - Settings file format: set by the roadmap Stage 2 installation acceptance.
 - Dashboard layout: set when the Pages dashboard is built in roadmap Stage 2.
 - Default model and reasoning effort: set by the review quality acceptance of roadmap Stage 3.

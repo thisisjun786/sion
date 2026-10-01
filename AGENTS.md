@@ -1,7 +1,7 @@
 # SION Working Rules
 
 Follow [MANIFESTO.md](MANIFESTO.md) for product principles and [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process. The user's latest explicit instructions take precedence.
-The [roadmap](https://github.com/thisisjun786/sion/issues/1) sets the current direction. Design contracts will live in `docs/design/`; implement against them and change them by PR.
+The [roadmap](https://github.com/thisisjun786/sion/issues/1) sets the current direction. Product design contracts live in [docs/design](docs/design/); implement against them and change them by PR.
 
 - Read the requested scope and relevant files before making changes. Keep changes focused.
 - Follow the [language policy](CONTRIBUTING.md#language) for issue and PR titles and bodies.

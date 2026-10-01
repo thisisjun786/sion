@@ -70,6 +70,39 @@ Use the actionlint version pinned in the workflow. During iteration, run the aff
 
 Introduce a new component together with its real verification commands, path mapping, and gate expectations. Tests must exercise the behavior being changed; bug fixes need a regression that fails without the fix. Build/install checks should use the produced artifact. Share commands between local and CI execution, and avoid running the same suite again in an aggregator. Cache downloads and reproducible build inputs, not previous pass/fail results.
 
+## Upstream tree
+
+SION's product code is the upstream ClawSweeper tree under `upstream/` and SION's additions to it ([source layout](../design/sion.md#source-layout)). The [dependency policy](dependencies.md) governs its packages.
+
+### Toolchain
+
+The `foundation` gate builds and tests the tree with upstream's own toolchain, read from `upstream/package.json`:
+
+- Node.js at the major version that upstream's `engines` field requires: Node 24.
+- pnpm at the exact version that upstream's `packageManager` field names, activated with corepack.
+- `pnpm install --frozen-lockfile` in `upstream/`, which fails when upstream's lockfile and manifest disagree.
+
+### Registration and path mapping
+
+The PR that brings in the upstream tree registers it in [ci-scope.mjs](../../.github/scripts/ci-scope.mjs). Until then its paths remain unmapped and `foundation` refuses to pass. A change to any path under `upstream/` selects the `upstream` job.
+
+Every path under `upstream/` belongs to the tree, including Markdown and upstream's own `.github/`. SION's docs check skips Markdown under `upstream/`; upstream's own docs check covers it as part of `pnpm run check`. SION's own TypeScript, the generated protocol types and the conformance fixtures register their commands and paths in the same way when they are added.
+
+### Job
+
+`upstream` runs after `selection`, in parallel with `docs` and `automation`. `foundation` evaluates it like the others: when selected it must report `success`, and when not selected it must report `skipped`.
+
+- **upstream:** sets up the toolchain above, installs with `pnpm install --frozen-lockfile` in `upstream/`, and runs `pnpm run check` there, the check that upstream's own CI runs. It has no secrets and no write token. Checks that call a model or need a provider credential run separately, as described under Boundaries and releases.
+
+The job caches the pnpm store by the hash of upstream's lockfile and workspace file, never `node_modules` or results. Adding the job changes the full-mode run, so the PR that registers the tree records a new full-mode baseline and bound in the timing table.
+
+```sh
+corepack enable
+cd upstream
+pnpm install --frozen-lockfile
+pnpm run check
+```
+
 ## Boundaries and releases
 
 Verification uses read-only tokens and disposable runners. Only the metadata-only PR-closing job has pull-request write permission; it does not check out contributor code. Do not expose account secrets, personal data, or production services to PR code. Actual model/provider calls and subjective quality evaluations run separately in explicitly authorized environments.
