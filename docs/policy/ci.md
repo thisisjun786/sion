@@ -9,7 +9,7 @@ selection ----+---- docs -------+---- foundation
               +---- automation-+
 ```
 
-`selection` records the exact base and candidate commits, changed paths, selected checks, and the selection reason. It also checks Git whitespace errors. `docs` and `automation` run independently after selection. `foundation` only evaluates their results; it never reruns their commands.
+`selection` records the exact base and candidate commits, changed paths, selected checks, and the selection reason. It also checks Git whitespace errors and leftover conflict markers in the change, outside `upstream/` (see [Upstream tree](#upstream-tree)). `docs` and `automation` run independently after selection. `foundation` only evaluates their results; it never reruns their commands.
 
 | Event | Coverage |
 | --- | --- |
@@ -35,7 +35,7 @@ Deleted paths and both sides of a rename participate. A `.md` suffix alone does 
 
 ## Current checks
 
-- **docs:** validate local file targets in all tracked Markdown and `LICENSE`, including links from unchanged documents to deleted targets. This does not validate external URLs, heading anchors, or the meaning of prose.
+- **docs:** validate local file targets in all tracked Markdown and `LICENSE` outside `upstream/`, including links from unchanged documents to deleted targets. This does not validate external URLs, heading anchors, or the meaning of prose.
 - **automation:** check JavaScript syntax, run the Node behavioral suite, and validate Actions syntax and shell blocks with the pinned actionlint release. Release tests execute the workflow's actual shell steps against disposable Git repositories and explicit GitHub-response fixtures; they never publish real releases. The pinned actionlint archive is cached by version and checksum; every run re-verifies the checksum before extraction.
 
 The scripts use Node 20 or newer and built-in modules. Release fixtures also use Bash, Git, and jq. Action versions and the actionlint checksum live in the workflow.
@@ -63,7 +63,7 @@ The Actions summary names the candidate, selection reason, and job results. A gr
 node .github/scripts/check-docs.mjs
 node --test .github/scripts/*.test.mjs
 actionlint
-git diff --check
+git diff --check -- . ':(exclude)upstream/'
 ```
 
 Use the actionlint version pinned in the workflow. During iteration, run the affected test file rather than repeating the entire suite. Pure prose needs reading and link/format checks, not tests pinning its wording.
@@ -86,7 +86,12 @@ The `foundation` gate builds and tests the tree with upstream's own toolchain, r
 
 The PR that brings in the upstream tree registers it in [ci-scope.mjs](../../.github/scripts/ci-scope.mjs). Until then its paths remain unmapped and `foundation` refuses to pass. A change to any path under `upstream/` selects the `upstream` job.
 
-Every path under `upstream/` belongs to the tree, including Markdown and upstream's own `.github/`. SION's docs check skips Markdown under `upstream/`; upstream's own docs check covers it as part of `pnpm run check`. SION's own TypeScript, the generated protocol types and the conformance fixtures register their commands and paths in the same way when they are added.
+Every path under `upstream/` belongs to the tree, including Markdown and upstream's own `.github/`. SION's own checks skip the tree, which upstream's own checks cover, and SION keeps its files as upstream ships them:
+
+- SION's docs check skips Markdown under `upstream/`; upstream's own docs check covers it as part of `pnpm run check`.
+- The whitespace check in `selection` skips every path under `upstream/`. Upstream's files hold what that check flags, such as trailing whitespace in recorded transcripts and conflict markers in repair test inputs, and SION does not rewrite them.
+
+SION's own TypeScript, the generated protocol types and the conformance fixtures register their commands and paths in the same way when they are added.
 
 ### Job
 

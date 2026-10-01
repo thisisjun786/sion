@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Check local file targets in tracked Markdown and LICENSE. This is not an anchor or URL checker.
+// Check local file targets in tracked Markdown and LICENSE outside the upstream tree. This is not an anchor or URL checker.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 const tracked = new Set(execFileSync('git', ['ls-files', '--cached', '-z'], { cwd: root }).toString('utf8').split('\0').filter(Boolean));
-const documents = [...tracked].filter((name) => /\.md$/i.test(name) || name === 'LICENSE').sort();
+// Upstream's own check covers the Markdown under upstream/, which SION keeps as upstream ships it.
+const documents = [...tracked].filter((name) => (/\.md$/i.test(name) || name === 'LICENSE') && !name.startsWith('upstream/')).sort();
 const failures = [];
 
 function insideRoot(target) {
