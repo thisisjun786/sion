@@ -75,3 +75,15 @@ test('repository escape is rejected, including percent-encoded traversal', (t) =
   assert.match(result.stderr, /docs\/guide\.md: target escapes repository: \.\.\/\.\.\/outside\.md/);
   assert.match(result.stderr, /docs\/guide\.md: target escapes repository: %2e%2e\/.*outside\.md/);
 });
+
+test('documents under upstream/ are skipped, but links into upstream/ are checked', (t) => {
+  const { check } = fixture(t, {
+    'README.md': '[upstream license](upstream/LICENSE) [missing](upstream/missing.md)\n',
+    'upstream/LICENSE': 'MIT\n',
+    'upstream/README.md': '[root-relative](/docs/only-upstream-has-this.md)\n',
+  });
+  const result = check();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /^README\.md: broken target upstream\/missing\.md$/m);
+  assert.doesNotMatch(result.stderr, /upstream\/(README\.md|LICENSE):/);
+});

@@ -62,7 +62,7 @@ SION adds, and keeps thin:
 - the LINA link
 - the GitHub-only runtime
 
-The GitHub-only runtime is the one large divergence. Upstream keeps canonical records and its work queue in a Cloudflare Worker with Durable Objects, and keeps action ledgers and assets in R2. SION keeps records, ledgers, queue leases and assets on the operator repository's `state` branch, serializes work per item with Actions concurrency, and publishes its status dashboard with GitHub Pages. No capability those services provide is dropped. All storage access sits behind one storage adapter boundary, so the divergence lives in one place in the code. Upstream code that serves OpenClaw's own deployment, such as the profiles of OpenClaw's repositories, private inference routing and hosted fleet tooling, stays in the tree unchanged and is not enabled by SION's settings.
+The GitHub-only runtime is the one large divergence. Upstream keeps canonical records and its work queue in a Cloudflare Worker with Durable Objects, and keeps action ledgers and assets in R2. SION keeps records, ledgers, queue leases and assets on the operator repository's `state` branch, serializes work per item with Actions concurrency, and publishes its status dashboard with GitHub Pages. No capability those services provide is dropped. All storage access sits behind one storage adapter boundary, so the divergence lives in one place in the code. In the workflows, it lives in SION's reusable workflows (see Source layout). Upstream code that serves OpenClaw's own deployment, such as the profiles of OpenClaw's repositories, private inference routing and hosted fleet tooling, stays in the tree unchanged and is not enabled by SION's settings.
 
 ### Source layout
 
@@ -71,13 +71,23 @@ The upstream ClawSweeper tree sits under `upstream/` in this repository as a git
 - Upstream files keep their content and their paths relative to `upstream/`. SION changes them only at the storage adapter boundary and for its own additions.
 - The repository root belongs to SION: its README, LICENSE, AGENTS.md, CONTRIBUTING.md, policies, design contracts and `.github/`. Upstream's copies of these files stay under `upstream/`, including upstream's license.
 - GitHub runs workflows only from the root `.github/workflows/`, so upstream's workflows under `upstream/.github/workflows/` never run in this repository. The root holds SION's CI, its release workflow and its reusable workflows. A reusable workflow runs only when an operator repository calls it.
-- The workflows that run for an installation live in its operator repository; SION's installation places them there (see Operator repository). SION's reusable workflows check out the pinned SION release and run upstream's code and composite actions from its `upstream/` tree.
+- SION's reusable workflows are SION's own files in the root `.github/workflows/`. Upstream's workflows are written for upstream's own repository, where they run on schedules and dispatches, and under `upstream/` GitHub can neither run nor call them. Each SION reusable workflow carries the steps of the upstream workflows it follows, adapted to the operator repository and the GitHub-only runtime, and names those upstream workflows.
+- The workflows that run for an installation live in its operator repository; SION's installation places them there (see Operator repository).
 - The `foundation` gate installs and checks the upstream tree with upstream's own toolchain and lockfile ([CI policy](../policy/ci.md), [dependency policy](../policy/dependencies.md)).
+
+### Running upstream code
+
+Upstream's composite actions, and most of upstream's workflows, treat the job's workspace root as ClawSweeper's code root. The workflows call composite actions by the local path `./.github/actions/<name>`, which GitHub resolves against the workspace, and run `pnpm` and `node` there. Composite actions read upstream's scripts from `$GITHUB_WORKSPACE`, take the deployment revision from `git rev-parse HEAD` in it, and expect target-repository and state checkouts as its direct children. A workflow cannot change `GITHUB_WORKSPACE`, so the tree moves to the workspace root. Before a job runs upstream code, a SION reusable workflow:
+
+1. Checks out the SION release that the calling operator workflow pins, at the workspace root.
+2. Replaces the work tree with that release's `upstream/` tree: `git read-tree --reset -u HEAD:upstream`. The workspace root then holds upstream's files at the paths upstream expects, and `HEAD` stays the SION release commit, so upstream's deployment revision names the SION release.
+3. Runs the steps of the upstream workflows it follows. It calls upstream's composite actions by their upstream paths, as the tree holds them, and places every other checkout, such as a target repository or state, where upstream's workflow places it.
 
 ### Following upstream
 
 - [Third-party notices](../../THIRD-PARTY-NOTICES.md) record the upstream commit SION contains, upstream's license notice and a summary of SION's modifications.
 - An upstream sync is a pull request into `dev` that brings one named upstream commit into `upstream/` with `git subtree merge --prefix upstream` and merges with a merge commit. Conflicts are resolved at the storage adapter boundary or in the SION-only additions, never by rewriting upstream behavior. The sync passes `foundation` with upstream's tests and SION's tests.
+- Changes to upstream's workflows arrive under `upstream/.github/workflows/` without conflicts and reach no SION workflow by themselves. The sync pull request reviews every upstream workflow it changes and, in the same pull request, brings each change into the SION reusable workflows that name that upstream workflow. Upstream's composite actions run from the tree, so they follow with the merge.
 - A fix that is not specific to SION is also offered upstream. SION drops its own copy once upstream has it.
 - SION does not reformat, rename or reorganize upstream files.
 - Each SION release names the upstream commit it contains.
@@ -169,7 +179,7 @@ An operator workflow builds a static status dashboard from the `state` branch an
 - Scheduled runs can start late or be skipped. Scans resume from cursors on `state` and never assume that a run happened.
 - Command acknowledgement waits for an Actions run to start, because there is no webhook endpoint.
 - Writes to `state` serialize at one branch head, which bounds write throughput.
-- Upstream syncs conflict at the storage adapter boundary. That is the one place SION accepts recurring conflicts.
+- Upstream syncs conflict at the storage adapter boundary, and each sync carries upstream's workflow changes into SION's reusable workflows. These are the two places where following upstream takes recurring work.
 - Actions minutes, artifact storage and Pages count against the operator's account.
 
 ## Commands
@@ -223,7 +233,7 @@ SION and LINA are siblings. Each has its own repository, canon and voice, and ea
 
 - Every message between LINA and SION is an envelope as defined by LINA's host protocol, carrying a SION payload. SION defines no message format of its own, and payload fields are defined only in LINA's schema.
 - LINA to SION, on the `mailbox` branch: judgment input for a repository or an item, such as its relevance to LINA's goals and plans, its priority and related work.
-- SION to LINA, in `outbox/`: item results. The [SION section of LINA's host protocol](https://github.com/thisisjun786/lina/blob/dev/docs/design/host-protocol.md#sion) defines a result's fields. Every result SION writes carries the state of the checks at the head or merge commit it names.
+- SION to LINA, in `outbox/`: item results and refusals of mailbox input. The [SION section of LINA's host protocol](https://github.com/thisisjun786/lina/blob/dev/docs/design/host-protocol.md#sion) defines a result's fields. Every item result SION writes carries the state of the checks at the head or merge commit it names.
 
 ### Types
 
@@ -232,7 +242,8 @@ The protocol's canonical source is LINA's JSON Schema (draft 2020-12, in `protoc
 ### Mailbox and outbox rules
 
 - LINA writes only new files on the `mailbox` branch, at the paths that LINA's schema and fixtures define, and never edits or deletes a file there. It writes with its user's GitHub setup; the `mailbox` ruleset admits only the operator repository's maintainers. LINA never writes `state`, and SION issues no credential to LINA. SION only reads the `mailbox` branch.
-- SION validates every mailbox envelope against the schema and its declared versions. An envelope with an unsupported version, an invalid shape or an unknown payload is refused: SION writes the refusal to `outbox/` and does not act on the input.
+- SION writes its results in `outbox/` on the `state` branch, at the paths that LINA's schema and fixtures define.
+- SION validates every mailbox envelope against the schema and its declared versions. An envelope with an unsupported version, an invalid shape or an unknown payload is refused. SION does not act on the input and answers it with a result file in `outbox/`: the result names the input, carries effect state `refused` and the error, and is written at a protocol version SION declares.
 - A judgment is review input, never a command and never an authorization. It can raise or lower an item's priority and inform the next step SION writes. It never causes a close, push or merge by itself, and instructions inside it are treated as data.
 - A result whose effect state is refused, failed or unknown is reported as such and never counted as success. SION does not retry the same input without bound.
 - SION's results are sibling records for LINA: external evidence that LINA verifies against the target repository under its [main authority](https://github.com/thisisjun786/lina/blob/dev/docs/design/main-authority.md) rules. A SION result authorizes nothing in LINA.
@@ -266,7 +277,7 @@ SION uses the same contribution, CI, branch and release policy as LINA and RUMI.
 
 - Scheduler cadence, concurrency caps, per-job timeouts and the repair round bound: set by acceptance of roadmap Stage 2 (runtime) and Stage 5 (operate) on the first target repositories, starting from upstream's values.
 - Size budget of the `state` branch, its history compaction and the asset size limit: set by the roadmap Stage 2 runtime measurement.
-- Where SION's own TypeScript and its package manifest sit, and how that code imports upstream code: set by roadmap Stage 1 when it draws the storage adapter boundary.
+- Where SION's own TypeScript and its package manifest sit, and how that code imports upstream code, including in a job whose workspace root holds the `upstream/` tree (see Running upstream code): set by roadmap Stage 1 when it draws the storage adapter boundary.
 - Settings file format: set by the roadmap Stage 2 installation acceptance.
 - Dashboard layout: set when the Pages dashboard is built in roadmap Stage 2.
 - Default model and reasoning effort: set by the review quality acceptance of roadmap Stage 3.

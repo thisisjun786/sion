@@ -52,14 +52,14 @@ jobs:
           node .github/scripts/ci-scope.mjs \
             --base "$BASE_SHA" --head "$GITHUB_SHA" \
             --event "$GITHUB_EVENT_NAME" --base-ref "$BASE_REF"
-      - name: Check change whitespace
+      - name: Check change whitespace outside the upstream tree
         env:
           BASE_SHA: ${{ fromJSON(steps.scope.outputs.scope).base }}
         run: |
           if [[ -n "$BASE_SHA" ]]; then
-            git diff --check "$BASE_SHA" "$GITHUB_SHA"
+            git diff --check "$BASE_SHA" "$GITHUB_SHA" -- . ':(exclude)upstream/'
           else
-            git show --format= --check "$GITHUB_SHA"
+            git show --format= --check "$GITHUB_SHA" -- . ':(exclude)upstream/'
           fi
 
   docs:
