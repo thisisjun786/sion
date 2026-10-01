@@ -188,7 +188,7 @@ Repair is the internal loop that `/sion fix`, `/sion autofix` and `/sion automer
 4. Review the new head at its exact head, then wait for the required checks.
 5. Repeat until the result is clean, the round bound is reached, or a stop condition holds.
 
-The merge gates for `/sion automerge` are: a clean exact-head review of the final head, passing required checks, GitHub reporting the pull request mergeable, protection rules satisfied, the opt-in label present, no hold label, and the repository profile allowing the merge. A security-sensitive finding is repaired only under an explicit opt-in, and the pull request does not merge until a later exact-head review is clean.
+The merge gates for `/sion automerge` are: a clean exact-head review of the final head, passing required checks, every review thread resolved or answered by a recorded decision, GitHub reporting the pull request mergeable, protection rules satisfied, the opt-in label present, no hold label, and the repository profile allowing the merge. A security-sensitive finding is repaired only under an explicit opt-in, and the pull request does not merge until a later exact-head review is clean.
 
 ## Stages
 
