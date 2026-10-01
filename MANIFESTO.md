@@ -1,6 +1,6 @@
 # SION Manifesto
 
-**SION - Sweeping Inspector, Operator & Navigator.**
+**SION - Sweeping Inspector Over Noise.**
 
 **Keep the repository moving.**
 

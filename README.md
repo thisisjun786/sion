@@ -1,6 +1,6 @@
 # SION
 
-*Sweeping Inspector, Operator & Navigator.*
+*Sweeping Inspector Over Noise.*
 
 **Keep the repository moving.**
 
